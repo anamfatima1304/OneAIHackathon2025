@@ -1,11 +1,19 @@
 import { useState } from 'react';
 import { format, addDays } from 'date-fns';
 import { Play, Settings as SettingsIcon } from 'lucide-react';
-import type { ForecastModel } from '../types/inventory';
+import { fetchForecast, optimizeInventory } from '../services/api';
+import type {
+  ForecastModel,
+  OptimizationRequest,
+  DemandForecast,
+  InventoryRecommendation,
+  CostBreakdown,
+} from '../types/inventory';
+import type { ForecastResponse, OptimizationResponse } from '../services/api';
 
 interface SimulationControlsProps {
-  onRunForecast: (startDate: string, endDate: string, model: string) => void;
-  onOptimize: () => void;
+  onRunForecast: (startDate: string, endDate: string, model: string) => Promise<void> | void;
+  onOptimize: () => Promise<void> | void;
   isLoading: boolean;
 }
 
@@ -16,16 +24,50 @@ const FORECAST_MODELS: ForecastModel[] = [
   { id: 'ensemble', name: 'Ensemble' },
 ];
 
-export default function SimulationControls({ onRunForecast, onOptimize, isLoading }: SimulationControlsProps) {
+export default function SimulationControls({
+  onRunForecast,
+  onOptimize,
+  isLoading,
+}: SimulationControlsProps) {
   const today = new Date();
   const defaultEndDate = addDays(today, 90);
 
   const [startDate, setStartDate] = useState(format(today, 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(defaultEndDate, 'yyyy-MM-dd'));
   const [selectedModel, setSelectedModel] = useState('arima');
+  const [forecastData, setForecastData] = useState<ForecastResponse | null>(null);
+  const [optimizationData, setOptimizationData] = useState<OptimizationResponse | null>(null);
 
-  const handleRunForecast = () => {
-    onRunForecast(startDate, endDate, selectedModel);
+  const handleRunForecast = async () => {
+    try {
+      console.log('Running forecast with model:', selectedModel);
+      const data = await fetchForecast();
+      setForecastData(data);
+      console.log('Forecast result:', data);
+      // Trigger parent callback too if needed
+      onRunForecast(startDate, endDate, selectedModel);
+    } catch (err) {
+      console.error('Forecast error:', err);
+      alert('Error fetching forecast data');
+    }
+  };
+
+  const handleOptimize = async () => {
+    try {
+      const request: OptimizationRequest = {
+        startDate,
+        endDate,
+        model: selectedModel,
+        // remove constraints if not defined in type
+      };
+      const data = await optimizeInventory(request);
+      setOptimizationData(data);
+      console.log('Optimization result:', data);
+      onOptimize();
+    } catch (err) {
+      console.error('Optimization error:', err);
+      alert('Error optimizing inventory');
+    }
   };
 
   return (
@@ -34,6 +76,7 @@ export default function SimulationControls({ onRunForecast, onOptimize, isLoadin
         <h2>Simulation Controls</h2>
         <p className="card-subtitle">Configure and run forecasting models</p>
       </div>
+
       <div className="card-body">
         <div className="controls-grid">
           <div className="control-group">
@@ -76,19 +119,12 @@ export default function SimulationControls({ onRunForecast, onOptimize, isLoadin
         </div>
 
         <div className="button-group">
-          <button
-            onClick={handleRunForecast}
-            disabled={isLoading}
-            className="btn btn-primary"
-          >
+          <button onClick={handleRunForecast} disabled={isLoading} className="btn btn-primary">
             <Play size={18} />
-            <span>{isLoading ? 'Running...' : 'Run Forecast'}</span>
+            <span>{isLoading ? 'Running...' : 'Predict'}</span>
           </button>
-          <button
-            onClick={onOptimize}
-            disabled={isLoading}
-            className="btn btn-secondary"
-          >
+
+          <button onClick={handleOptimize} disabled={isLoading} className="btn btn-secondary">
             <SettingsIcon size={18} />
             <span>{isLoading ? 'Optimizing...' : 'Optimize Inventory'}</span>
           </button>
@@ -96,9 +132,20 @@ export default function SimulationControls({ onRunForecast, onOptimize, isLoadin
 
         <div className="date-range-info">
           <p>
-            Forecast period: <strong>{Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24))}</strong> days
+            Forecast period:{' '}
+            <strong>
+              {Math.ceil(
+                (new Date(endDate).getTime() - new Date(startDate).getTime()) /
+                  (1000 * 60 * 60 * 24)
+              )}
+            </strong>{' '}
+            days
           </p>
         </div>
+
+        {/* Optional: show backend response */}
+        {forecastData && <pre>{JSON.stringify(forecastData, null, 2)}</pre>}
+        {optimizationData && <pre>{JSON.stringify(optimizationData, null, 2)}</pre>}
       </div>
     </div>
   );

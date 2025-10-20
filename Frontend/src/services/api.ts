@@ -12,9 +12,9 @@ export interface OptimizationResponse {
 }
 
 export async function fetchForecast(): Promise<ForecastResponse> {
-  const response = await fetch(`${API_BASE_URL}/forecast`);
+  const response = await fetch(`${API_BASE_URL}/predict`);
   if (!response.ok) {
-    throw new Error(`Failed to fetch forecast: ${response.statusText}`);
+    throw new Error(`Failed to fetch predict: ${response.statusText}`);
   }
   return response.json();
 }
