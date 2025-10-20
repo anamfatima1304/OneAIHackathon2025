@@ -6,6 +6,8 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 from datetime import datetime, timedelta
 import os
 import traceback
+import numpy as np
+from scipy import stats
 
 app = Flask(__name__)
 CORS(app)
@@ -17,9 +19,19 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "Demand_Trends.csv")
 FORECAST_DAYS = 90
 
+# Optimization constants (from your script)
+LEAD_TIME = 7
+RMSE = 25.85
+SERVICE_LEVEL = 0.95
+Z_SCORE = stats.norm.ppf(SERVICE_LEVEL)
+
 def forecast_filename_for_today():
     today_str = pd.Timestamp.today().strftime('%Y-%m-%d')
     return os.path.join(BASE_DIR, f"forecast_{today_str}.csv")
+
+def forecast_updated_filename_for_today():
+    today_str = pd.Timestamp.today().strftime('%Y-%m-%d')
+    return os.path.join(BASE_DIR, f"forecast_{today_str}_updated.csv")
 
 # -------------------------------
 # Helper: validate dataset
@@ -121,10 +133,8 @@ def predict():
                         print("Today's date already present in Demand_Trends.csv — no update performed.")
                     else:
                         # Find today's predicted value from forecast_df (date column could be Timestamp)
-                        # Ensure forecast_df['date'] is datetime
                         forecast_df_local = forecast_df.copy()
                         forecast_df_local['date'] = pd.to_datetime(forecast_df_local['date'])
-                        # Match today's row
                         today_row = forecast_df_local[forecast_df_local['date'].dt.date == today_date]
                         if today_row.empty:
                             print("No forecast row found for today — skipping append.")
@@ -165,29 +175,89 @@ def predict():
         return jsonify({"success": False, "error": str(e)}), 500
 
 # -------------------------------
-# API Endpoint: Optimization (example)
+# API Endpoint: Optimization (detailed)
 # -------------------------------
 @app.route('/optimize', methods=['GET'])
 def optimize():
+    """
+    Compute optimization metrics based on today's forecast:
+    - safety_stock (Z * RMSE * sqrt(lead_time))
+    - lead_time_demand (rolling sum over lead_time)
+    - reorder_point = lead_time_demand + safety_stock
+    - order_quantity (2 weeks of average demand)
+    - order_today = sum of first LEAD_TIME predicted demands + safety_stock
+    Returns JSON with summary numbers and a sample of rows.
+    """
     try:
-        out_file = forecast_filename_for_today()
-        if os.path.exists(out_file):
-            forecast_df = pd.read_csv(out_file)
-            recommended_order_qty = int(forecast_df['predicted_demand'].mean() + 50)
+        # Ensure today's forecast exists (generate if needed)
+        forecast_file = forecast_filename_for_today()
+        if not os.path.exists(forecast_file):
+            print("Today's forecast not found — generating via /predict flow.")
+            # call internal predict generation logic: load data and compute forecast
+            if not os.path.exists(DATA_FILE):
+                raise FileNotFoundError(f"Data file not found: {DATA_FILE}")
+            df_raw = pd.read_csv(DATA_FILE)
+            forecast_df = forecast_next_days_start_today(df_raw, FORECAST_DAYS)
+            forecast_df.to_csv(forecast_file, index=False)
+            print(f"Forecast generated and saved: {forecast_file}")
         else:
-            recommended_order_qty = 200
+            forecast_df = pd.read_csv(forecast_file)
+            print(f"Loaded forecast from file: {forecast_file}")
 
-        return jsonify({
+        # Ensure date dtype and predicted_demand numeric
+        forecast_df['date'] = pd.to_datetime(forecast_df['date'])
+        forecast_df['predicted_demand'] = pd.to_numeric(forecast_df['predicted_demand'])
+
+        # Safety stock (Z * RMSE * sqrt(LEAD_TIME))
+        safety_stock = float(Z_SCORE * RMSE * np.sqrt(LEAD_TIME))
+
+        # lead_time_demand: rolling sum over LEAD_TIME days (aligned to end of window)
+        forecast_df['lead_time_demand'] = forecast_df['predicted_demand'].rolling(window=LEAD_TIME, min_periods=1).sum()
+
+        # reorder point
+        forecast_df['reorder_point'] = forecast_df['lead_time_demand'] + safety_stock
+
+        # order quantity: 2 weeks of average demand (14 days)
+        avg_demand = float(forecast_df['predicted_demand'].mean())
+        order_quantity = float(avg_demand * 14)
+
+        # today's order: sum of first LEAD_TIME predicted demands + safety_stock
+        first_lead_demand_sum = float(forecast_df['predicted_demand'].iloc[:LEAD_TIME].sum())
+        order_today = first_lead_demand_sum + safety_stock
+
+        # Save updated CSV (with columns added) next to the forecast file
+        updated_file = forecast_updated_filename_for_today()
+        # save full dataframe
+        forecast_df.to_csv(updated_file, index=False)
+        print(f"Updated forecast saved with optimization columns: {updated_file}")
+
+        # Prepare a small table (first 14 rows) for quick inspection
+        sample_table = forecast_df[['date', 'predicted_demand', 'lead_time_demand', 'reorder_point']].head(14)
+        # Convert dates to string for JSON
+        sample_table['date'] = sample_table['date'].dt.strftime('%Y-%m-%d')
+        sample_rows = sample_table.to_dict(orient='records')
+
+        result = {
             "success": True,
-            "optimization": {
-                "reorder_point": 120,
-                "safety_stock": 50,
-                "recommended_order_qty": recommended_order_qty
-            }
-        })
-    except Exception:
+            "summary": {
+                "safety_stock": round(safety_stock, 2),
+                "average_daily_demand": round(avg_demand, 2),
+                "order_quantity_14_days": round(order_quantity, 2),
+                "order_today": round(order_today, 2),
+                "lead_time_days": LEAD_TIME,
+                "service_level": SERVICE_LEVEL,
+                "rmse_used": RMSE
+            },
+            "sample_rows": sample_rows,
+            "updated_csv": os.path.basename(updated_file)
+        }
+
+        return jsonify(result)
+
+    except Exception as e:
+        print("ERROR in /optimize — full traceback:")
         traceback.print_exc()
-        return jsonify({"success": False, "error": "Optimization failed"}), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 # -------------------------------
 # Run Flask
