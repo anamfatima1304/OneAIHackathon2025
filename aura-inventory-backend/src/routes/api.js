@@ -6,3 +6,4 @@ router.get('/predict', predict);    // get 90-day forecast
 router.get('/optimize', optimize);  // get optimal reorder plan
 
 module.exports = router;
+ 

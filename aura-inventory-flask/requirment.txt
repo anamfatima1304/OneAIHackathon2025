@@ -1,0 +1,4 @@
+Flask
+pandas
+numpy
+prophet   # For forecasting (or use any other forecasting library)
