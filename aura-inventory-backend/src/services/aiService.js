@@ -1,5 +1,5 @@
 const axios = require('axios');
-const FLASK_URL = process.env.FLASK_URL || 'http://localhost:5000';
+const FLASK_URL = process.env.FLASK_URL;
 
 // Get 90-day forecast from Flask
 const callPredict = async () => {
