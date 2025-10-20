@@ -1,110 +1,86 @@
-# app.py
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import pandas as pd
-from statsmodels.tsa.statespace.sarimax import SARIMAX
-from datetime import timedelta
-import os
+import numpy as np
+import traceback
 
 app = Flask(__name__)
-CORS(app)  # allow requests from frontend (React/Node)
+CORS(app)
 
-# -------------------------------
-# Configuration
-# -------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_FILE = os.path.join(BASE_DIR, "Demand_Trends.csv")
-FORECAST_DAYS = 90
-FORECAST_FILE = os.path.join(BASE_DIR, "forecast_90_days.csv")  # Save forecast here
-
-# -------------------------------
-# Helper function for SARIMA Forecast
-# -------------------------------
-def forecast_next_days(df, forecast_days=90):
-    """Train SARIMA on historical demand and forecast next N days."""
-    model = SARIMAX(
-        df['demand'],
-        order=(2, 1, 2),
-        seasonal_order=(1, 1, 1, 7),  # weekly seasonality
-        enforce_stationarity=False,
-        enforce_invertibility=False
-    )
-    model_fit = model.fit(disp=False)
-    forecast = model_fit.forecast(steps=forecast_days)
-
-    last_date = df.index[-1]
-    future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=forecast_days)
-
-    forecast_df = pd.DataFrame({
-        'date': future_dates,
-        'predicted_demand': forecast
-    })
-
-    # Save forecast to CSV
-    forecast_df.to_csv(FORECAST_FILE, index=False)
-    print(f"Forecast saved to {FORECAST_FILE}")
-
-    return forecast_df
-
-# -------------------------------
-# API Endpoint: Forecast
-# -------------------------------
-@app.route('/predict', methods=['GET'])
+@app.route('/api/predict', methods=['GET'])
 def predict():
     try:
-        # Check if forecast CSV exists
-        if os.path.exists(FORECAST_FILE):
-            forecast_df = pd.read_csv(FORECAST_FILE)
+        # Get query params from frontend
+        model = request.args.get("model", "arima").lower()
+        start_date = request.args.get("start_date", "2025-10-20")
+        end_date = request.args.get("end_date", "2026-01-18")
+
+        # Generate forecast dates
+        days = pd.date_range(start=start_date, end=end_date, freq='D')
+
+        # Generate mock data based on model type
+        if model == "arima":
+            base = 100
+            noise = np.random.normal(0, 10, len(days))
+            predictions = base + np.cumsum(noise)
+        elif model == "sarima":
+            base = 120
+            noise = np.random.normal(0, 8, len(days))
+            predictions = base + np.cumsum(noise)
+        elif model == "lstm":
+            base = 90
+            noise = np.random.normal(0, 15, len(days))
+            predictions = base + np.cumsum(noise)
         else:
-            # Load dataset
-            df = pd.read_csv(DATA_FILE)
-            df['date'] = pd.to_datetime(df['date'])
-            df = df.sort_values('date')
-            df.set_index('date', inplace=True)
+            base = 100
+            noise = np.random.normal(0, 10, len(days))
+            predictions = base + np.cumsum(noise)
 
-            # Forecast next 90 days and save CSV
-            forecast_df = forecast_next_days(df, FORECAST_DAYS)
-
-        # Convert to list of dicts for JSON
-        forecast_json = forecast_df.to_dict(orient='records')
+        # Build JSON response
+        forecast = []
+        for i, d in enumerate(days):
+            forecast.append({
+                "date": str(d.date()),
+                "predicted_demand": round(predictions[i], 2)
+            })
 
         return jsonify({
-            "success": True,
-            "forecast": forecast_json
+            "model_used": model.upper(),
+            "total_days_predicted": len(forecast),
+            "forecast": forecast
         })
 
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        print("❌ Error in /api/predict route:")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
-# -------------------------------
-# API Endpoint: Optimization (dummy example)
-# -------------------------------
-@app.route('/optimize', methods=['GET'])
+
+@app.route('/api/optimize', methods=['POST'])
 def optimize():
-    # Example: read forecast from CSV
-    if os.path.exists(FORECAST_FILE):
-        forecast_df = pd.read_csv(FORECAST_FILE)
-        last_inventory = 250  # Example: can come from dataset or business logic
-        lead_time = 7
-        # Dummy calculation
-        recommended_order_qty = int(forecast_df['predicted_demand'].mean() + 50)
-    else:
-        recommended_order_qty = 200
-
-    return jsonify({
-        "success": True,
-        "optimization": {
-            "reorder_point": 120,
-            "safety_stock": 50,
-            "recommended_order_qty": recommended_order_qty
+    try:
+        data = request.get_json(force=True)
+        # Mock optimization logic
+        recommendations = [
+            {"item": "Product A", "order_quantity": 120},
+            {"item": "Product B", "order_quantity": 85},
+            {"item": "Product C", "order_quantity": 60}
+        ]
+        cost_breakdown = {
+            "total_cost": 5600,
+            "storage_cost": 1200,
+            "ordering_cost": 4400
         }
-    })
+        return jsonify({
+            "recommendations": recommendations,
+            "costBreakdown": cost_breakdown
+        })
+    
+    except Exception as e:
+        print("❌ Error in /api/optimize route:")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
-# -------------------------------
-# Run Flask
-# -------------------------------
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(port=5000, debug=True)

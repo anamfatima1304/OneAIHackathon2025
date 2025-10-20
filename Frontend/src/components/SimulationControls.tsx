@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { format, addDays } from 'date-fns';
 import { Play, Settings as SettingsIcon } from 'lucide-react';
 import { fetchForecast, optimizeInventory } from '../services/api';
+import ForecastChart from './ForecastChart';
+
 import type {
   ForecastModel,
   OptimizationRequest,
@@ -144,9 +146,10 @@ export default function SimulationControls({
         </div>
 
         {/* Optional: show backend response */}
-        {forecastData && <pre>{JSON.stringify(forecastData, null, 2)}</pre>}
+        {forecastData && <ForecastChart forecastData={forecastData.forecast} />}
         {optimizationData && <pre>{JSON.stringify(optimizationData, null, 2)}</pre>}
       </div>
     </div>
   );
+  
 }
