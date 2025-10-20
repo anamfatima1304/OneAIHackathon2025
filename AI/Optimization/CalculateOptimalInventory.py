@@ -40,3 +40,14 @@ print(f"   (Covers next 7 days + safety buffer)")
 
 # Display results
 print("\n" + df[['date', 'predicted_demand', 'lead_time_demand', 'reorder_point']].to_string(index=False))
+
+# Get the folder where this script is located
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Output file path in the same folder
+output_file = os.path.join(script_dir, "forecast_90_days_updated.csv")
+
+# Save DataFrame
+df.to_csv(output_file, index=False)
+
+print(f"Updated CSV saved at: {output_file}")
